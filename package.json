@@ -1,0 +1,50 @@
+{
+  "name": "video-calling-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "vite",
+    "start": "electron .",
+    "dev:vite": "vite",
+    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "build": "vite build",
+    "preview": "vite preview",
+    "go": "start \"Vite\" vite && start \"Wait\" npx wait-on http://localhost:3001 && start \"Electron\" electron ."
+  },
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "@tailwindcss/vite": "^4.1.17",
+    "epress": "^0.0.1-security",
+    "express": "^5.2.0",
+    "http": "^0.0.1-security",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.6",
+    "simple-peer": "9.11.1",
+    "socket.io-client": "^4.8.1",
+    "tailwindcss": "^4.1.17",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.4",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "socket.io": "^4.8.1",
+    "vite": "npm:rolldown-vite@7.2.5",
+    "wait-on": "^9.0.3"
+  },
+  "overrides": {
+    "vite": "npm:rolldown-vite@7.2.5"
+  },
+  "main": "main.js"
+}

@@ -1,0 +1,25 @@
+{
+    "name": "video-streaming-signaling-server",
+    "version": "1.0.0",
+    "description": "Standalone signaling server for WebRTC video streaming",
+    "main": "server.js",
+    "type": "commonjs",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node server.js"
+    },
+    "keywords": [
+        "webrtc",
+        "signaling",
+        "socket.io",
+        "video-streaming"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "express": "^4.18.2",
+        "socket.io": "^4.8.1",
+        "dotenv": "^16.3.1",
+        "cors": "^2.8.5"
+    }
+}
