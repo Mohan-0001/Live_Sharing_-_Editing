@@ -274,6 +274,8 @@ export default function App() {
   }
 
   // Video event handlers for remote control (VIEWER ONLY)
+  const clickTimeout = useRef(null);
+
   const handleVideoMouseMove = (e) => {
     if (!myPermissions.mouseControl || !remoteControlActive) return;
     const coords = getScreenCoordinates(e);
@@ -283,9 +285,22 @@ export default function App() {
   const handleVideoClick = (e) => {
     if (!myPermissions.mouseControl || !remoteControlActive) return;
     e.preventDefault();
+
+    // Capture properties synchronously
     const coords = getScreenCoordinates(e);
     const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
-    sendRemoteControl("mouse-click", { ...coords, button });
+
+    // Clear any existing timeout
+    if (clickTimeout.current) {
+      clearTimeout(clickTimeout.current);
+      clickTimeout.current = null;
+    }
+
+    // Set a timeout to trigger single click if no double click occurs
+    clickTimeout.current = setTimeout(() => {
+      sendRemoteControl("mouse-click", { ...coords, button });
+      clickTimeout.current = null;
+    }, 250); // 250ms delay to wait for potential double click
   };
 
   const handleVideoWheel = (e) => {
@@ -297,6 +312,13 @@ export default function App() {
   const handleVideoDoubleClick = (e) => {
     if (!myPermissions.mouseControl || !remoteControlActive) return;
     e.preventDefault();
+
+    // Clear the single click timeout immediately
+    if (clickTimeout.current) {
+      clearTimeout(clickTimeout.current);
+      clickTimeout.current = null;
+    }
+
     const coords = getScreenCoordinates(e);
     sendRemoteControl("mouse-dblclick", coords);
   };
