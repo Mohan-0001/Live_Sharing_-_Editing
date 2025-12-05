@@ -39,6 +39,14 @@ export default function App() {
   // Check if running in Electron
   const isElectron = typeof window !== "undefined" && window.electronAPI?.isElectron;
 
+  useEffect(() => {
+    console.log('Full import.meta.env:', import.meta.env);
+    console.log('VITE_SIGNALING_SERVER specifically:', import.meta.env.VITE_SIGNALING_SERVER);
+    console.log('MODE:', import.meta.env.MODE);
+    console.log('Fallback from config (if env missing):', config.SIGNALING_SERVER);
+  }, []); // Empty dependency array = run once on mount
+
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -362,6 +370,7 @@ export default function App() {
 
   // Join room
   async function joinRoom() {
+    console.log('Attempting socket connection with URL:', config.SIGNALING_SERVER);
     if (!roomId.trim()) {
       alert("Please enter a room ID");
       return;
@@ -510,7 +519,8 @@ export default function App() {
         console.log("[Viewer] Event streams:", event.streams);
         console.log("[Viewer] Stream ID:", event.streams[0]?.id);
         console.log("[Viewer] Track ID:", event.track.id);
-        console.log("[Viewer] Current videoRef srcObject:", videoRef.current?.srcObject);
+        console.log("[Viewer] Track enabled:", event.track.enabled);
+        console.log("[Viewer] Track readyState:", event.track.readyState);
 
         if (videoRef.current && event.streams[0]) {
           console.log("[Viewer] Setting video srcObject to remote stream");
@@ -520,8 +530,19 @@ export default function App() {
           console.log("[Viewer] Video srcObject after setting:", videoRef.current.srcObject);
           console.log("[Viewer] Video srcObject tracks:", videoRef.current.srcObject?.getTracks());
 
+          // Monitor video state
+          videoRef.current.onloadedmetadata = () => {
+            console.log("[Viewer] Video loaded metadata. Size:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
+          };
+
+          videoRef.current.onresize = () => {
+            console.log("[Viewer] Video resized to:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
+          };
+
           // Force video to play
-          videoRef.current.play().catch(e => console.error("[Viewer] Play error:", e));
+          videoRef.current.play()
+            .then(() => console.log("[Viewer] Video playing successfully"))
+            .catch(e => console.error("[Viewer] Play error:", e));
         } else {
           console.error("[Viewer] Cannot set stream - videoRef or stream missing");
         }

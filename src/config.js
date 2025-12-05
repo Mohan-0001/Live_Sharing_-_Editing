@@ -3,7 +3,7 @@
 
 export const config = {
     // Signaling server URL - reads from environment variable or defaults to localhost
-    SIGNALING_SERVER: import.meta.env.VITE_SIGNALING_SERVER || "http://localhost:5000/remote-ctrl",
+    SIGNALING_SERVER: import.meta.env.VITE_SIGNALING_SERVER || "https://live-sharing-editing.onrender.com/",
 
     // ICE servers for WebRTC
     ICE_SERVERS: [

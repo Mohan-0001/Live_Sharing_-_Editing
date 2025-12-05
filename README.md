@@ -57,7 +57,7 @@ cp .env.example .env
 
 Edit `.env` to set your signaling server URL:
 ```env
-VITE_SIGNALING_SERVER=http://localhost:5000/remote-ctrl
+VITE_SIGNALING_SERVER=https://live-sharing-editing.onrender.com/
 ```
 
 ### 3. Start the Signaling Server
@@ -134,7 +134,7 @@ See [`signaling-server/README.md`](signaling-server/README.md) for detailed depl
 5. Copy your Railway URL (e.g., `https://your-app.railway.app`)
 6. Update your client `.env`:
    ```env
-   VITE_SIGNALING_SERVER=https://your-app.railway.app/remote-ctrl
+   VITE_SIGNALING_SERVER=https://live-sharing-editing.onrender.com/
    ```
 
 ### Building the Electron App
@@ -175,7 +175,7 @@ Edit `.env` file:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `VITE_SIGNALING_SERVER` | Signaling server URL | `http://localhost:5000/remote-ctrl` |
+| `VITE_SIGNALING_SERVER` | Signaling server URL | `https://live-sharing-editing.onrender.com/` |
 
 ### Server Configuration
 
@@ -231,7 +231,7 @@ PORT=8080
 **Client side:**
 ```bash
 # Update VITE_SIGNALING_SERVER in .env
-VITE_SIGNALING_SERVER=http://localhost:8080/remote-ctrl
+VITE_SIGNALING_SERVER=https://live-sharing-editing.onrender.com/
 ```
 
 ## 🛡️ Security Considerations

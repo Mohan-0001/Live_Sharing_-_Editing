@@ -43,7 +43,7 @@ Edit `.env` to change settings:
 npm start
 ```
 
-The server will start on `http://0.0.0.0:5000/remote-ctrl` by default.
+The server will start on `https://live-sharing-editing.onrender.com/` by default.
 
 ## Local Development
 
