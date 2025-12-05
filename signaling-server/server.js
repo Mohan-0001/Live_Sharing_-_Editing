@@ -83,11 +83,15 @@ namespace.on("connection", (socket) => {
                 console.log(`[${new Date().toISOString()}] Host ${socket.id} (${socket.userName}) joined room: ${roomId}`);
             }
 
-            // Notify all clients in room that host is ready
-            namespace.to(roomId).emit("host-ready", { hostId: socket.id });
+            // Notify all OTHER clients in room that host is ready (exclude host)
+            socket.broadcast.to(roomId).emit("host-ready", { hostId: socket.id });
 
         } else {
             // Viewer joining
+            if (config.ENABLE_LOGGING) {
+                console.log(`[${new Date().toISOString()}] Viewer joining - userName: "${userName}", roomId: "${roomId}"`);
+            }
+
             rooms[roomId].viewers.add(socket.id);
             socket.isHost = false;
             socket.roomId = roomId;
@@ -107,9 +111,13 @@ namespace.on("connection", (socket) => {
             // Notify host about new viewer with permission request
             const hostId = rooms[roomId].host;
             if (hostId) {
+                const viewerNameToSend = userName || "Viewer";
+                if (config.ENABLE_LOGGING) {
+                    console.log(`[${new Date().toISOString()}] Notifying host ${hostId} about viewer: "${viewerNameToSend}"`);
+                }
                 namespace.to(hostId).emit("new-viewer", {
                     viewerId: socket.id,
-                    viewerName: userName || "Viewer"
+                    viewerName: viewerNameToSend
                 });
             } else {
                 // No host yet, notify viewer
@@ -233,6 +241,23 @@ namespace.on("connection", (socket) => {
         namespace.to(target).emit("remote-mouse-click", { button, x, y, sender: socket.id });
     });
 
+    // Mouse double-click from viewer to host
+    socket.on("remote-mouse-dblclick", ({ target, x, y }) => {
+        if (!target) return;
+
+        // Check permissions
+        const roomId = socket.roomId;
+        if (roomId && rooms[roomId]) {
+            const permissions = rooms[roomId].permissions.get(socket.id);
+            if (!permissions || !permissions.mouseControl) {
+                socket.emit("error", { message: "Mouse control permission denied" });
+                return;
+            }
+        }
+
+        namespace.to(target).emit("remote-mouse-dblclick", { x, y, sender: socket.id });
+    });
+
     // Mouse scroll from viewer to host
     socket.on("remote-mouse-scroll", ({ target, deltaX, deltaY }) => {
         if (!target) return;
@@ -251,7 +276,7 @@ namespace.on("connection", (socket) => {
     });
 
     // Keyboard input from viewer to host
-    socket.on("remote-keyboard", ({ target, key, action }) => {
+    socket.on("remote-keyboard", ({ target, key, action, ctrlKey, shiftKey, altKey }) => {
         if (!target) return;
 
         // Check permissions
@@ -264,7 +289,47 @@ namespace.on("connection", (socket) => {
             }
         }
 
-        namespace.to(target).emit("remote-keyboard", { key, action, sender: socket.id });
+        namespace.to(target).emit("remote-keyboard", { key, action, ctrlKey, shiftKey, altKey, sender: socket.id });
+    });
+
+    // Clipboard copy request from viewer to host
+    socket.on("remote-clipboard-copy", ({ target }) => {
+        if (!target) return;
+
+        // Check permissions
+        const roomId = socket.roomId;
+        if (roomId && rooms[roomId]) {
+            const permissions = rooms[roomId].permissions.get(socket.id);
+            if (!permissions || !permissions.keyboardControl) {
+                socket.emit("error", { message: "Clipboard access permission denied" });
+                return;
+            }
+        }
+
+        namespace.to(target).emit("remote-clipboard-copy", { sender: socket.id });
+    });
+
+    // Clipboard paste from viewer to host
+    socket.on("remote-clipboard-paste", ({ target, text }) => {
+        if (!target) return;
+
+        // Check permissions
+        const roomId = socket.roomId;
+        if (roomId && rooms[roomId]) {
+            const permissions = rooms[roomId].permissions.get(socket.id);
+            if (!permissions || !permissions.keyboardControl) {
+                socket.emit("error", { message: "Clipboard access permission denied" });
+                return;
+            }
+        }
+
+        namespace.to(target).emit("remote-clipboard-paste", { text, sender: socket.id });
+    });
+
+    // Clipboard data response from host to viewer
+    socket.on("clipboard-data", ({ target, text }) => {
+        if (!target) return;
+        namespace.to(target).emit("clipboard-data", { text });
     });
 
     // ========== END REMOTE CONTROL EVENTS ==========

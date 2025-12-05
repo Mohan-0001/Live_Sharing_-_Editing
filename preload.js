@@ -22,8 +22,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     executeMouseScroll: async (deltaX, deltaY) => {
       return await ipcRenderer.invoke("execute-mouse-scroll", deltaX, deltaY);
     },
-    executeKeyboard: async (key, action) => {
-      return await ipcRenderer.invoke("execute-keyboard", key, action);
+    executeKeyboard: async (key, action, ctrlKey, shiftKey, altKey) => {
+      return await ipcRenderer.invoke("execute-keyboard", key, action, ctrlKey, shiftKey, altKey);
+    },
+  },
+
+  // Clipboard APIs
+  clipboard: {
+    readText: async () => {
+      return await ipcRenderer.invoke("clipboard-read-text");
+    },
+    writeText: async (text) => {
+      return await ipcRenderer.invoke("clipboard-write-text", text);
     },
   },
 });

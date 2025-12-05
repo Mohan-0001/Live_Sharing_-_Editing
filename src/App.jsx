@@ -8,6 +8,7 @@ export default function App() {
   const socket = useRef(null);
   const videoRef = useRef(null);
   const messageRef = useRef();
+  const videoContainerRef = useRef(null); // For fullscreen container
 
   // State management
   const [roomId, setRoomId] = useState("");
@@ -18,6 +19,7 @@ export default function App() {
   const [sources, setSources] = useState([]);
   const [selectedSource, setSelectedSource] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Permission state
   const [pendingPermissionRequest, setPendingPermissionRequest] = useState(null);
@@ -106,7 +108,11 @@ export default function App() {
 
     let stream = null;
     try {
-      if (isElectron && selectedSource) {
+      if (isElectron) {
+        if (!selectedSource) {
+          throw new Error("No screen source selected. Please select a screen or window to share from the dropdown.");
+        }
+        console.log("[Host] Capturing source:", selectedSource.name);
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
@@ -117,10 +123,18 @@ export default function App() {
           },
         });
       } else {
+        // Browser mode - use getDisplayMedia
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+          throw new Error("Screen sharing is not supported in this browser. Please use Chrome, Firefox, or Edge.");
+        }
         stream = await navigator.mediaDevices.getDisplayMedia({
           video: { cursor: "always" },
           audio: false,
         });
+      }
+
+      if (!stream) {
+        throw new Error("Failed to capture screen - no stream returned");
       }
 
       previewStream.current = stream;
@@ -133,9 +147,17 @@ export default function App() {
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
       });
 
+      console.log("[Host] Preview started successfully");
+
     } catch (err) {
       console.error("[Host] Preview failed:", err);
-      alert("Failed to start screen capture: " + err.message);
+      const errorMsg = err.name === "NotAllowedError"
+        ? "Screen sharing permission denied. Please allow screen sharing and try again."
+        : err.name === "NotSupportedError"
+          ? "Screen sharing is not supported in this browser or context."
+          : `Failed to start screen capture: ${err.message}`;
+      alert(errorMsg);
+      throw err; // Re-throw to prevent continuing without stream
     }
   }
 
@@ -154,6 +176,7 @@ export default function App() {
     };
 
     pc.onconnectionstatechange = () => {
+      console.log(`[WebRTC] Connection state for ${peerId}:`, pc.connectionState);
       if (pc.connectionState === "connected") {
         setConnectionStatus("connected");
       } else if (pc.connectionState === "failed" || pc.connectionState === "closed") {
@@ -161,6 +184,10 @@ export default function App() {
         try { pc.close(); } catch (e) { }
         delete peers.current[peerId];
       }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC] ICE state for ${peerId}:`, pc.iceConnectionState);
     };
 
     return pc;
@@ -191,11 +218,19 @@ export default function App() {
         case "mouse-click":
           await window.electronAPI.remoteControl.executeMouseClick(data.button, data.x, data.y);
           break;
+        case "mouse-dblclick":
+          await window.electronAPI.remoteControl.executeMouseDblClick(data.x, data.y);
+          break;
         case "mouse-scroll":
           await window.electronAPI.remoteControl.executeMouseScroll(data.deltaX, data.deltaY);
           break;
         case "keyboard":
-          await window.electronAPI.remoteControl.executeKeyboard(data.key, data.action);
+          await window.electronAPI.remoteControl.executeKeyboard(data.key, data.action, data.ctrlKey, data.shiftKey, data.altKey);
+          break;
+        case "clipboard-paste":
+          if (window.electronAPI.clipboard) {
+            await window.electronAPI.clipboard.writeText(data.text);
+          }
           break;
       }
     } catch (err) {
@@ -251,16 +286,77 @@ export default function App() {
     sendRemoteControl("mouse-scroll", { deltaX: e.deltaX, deltaY: e.deltaY });
   };
 
+  const handleVideoDoubleClick = (e) => {
+    if (!myPermissions.mouseControl || !remoteControlActive) return;
+    e.preventDefault();
+    const coords = getScreenCoordinates(e);
+    sendRemoteControl("mouse-dblclick", coords);
+  };
+
   const handleVideoKeyDown = (e) => {
     if (!myPermissions.keyboardControl || !remoteControlActive) return;
+
+    // Enhanced keyboard handling with clipboard support
+    const key = e.key;
+    const isCtrl = e.ctrlKey || e.metaKey;
+    const isShift = e.shiftKey;
+    const isAlt = e.altKey;
+
+    // Handle clipboard operations
+    if (isCtrl && key.toLowerCase() === 'c') {
+      e.preventDefault();
+      handleRemoteCopy();
+      return;
+    }
+    if (isCtrl && key.toLowerCase() === 'v') {
+      e.preventDefault();
+      handleRemotePaste();
+      return;
+    }
+
     e.preventDefault();
 
-    if (e.key.length === 1) {
+    // Send full keyboard event with modifiers
+    if (key.length === 1) {
       // Regular character
-      sendRemoteControl("keyboard", { key: e.key, action: "type" });
+      sendRemoteControl("keyboard", {
+        key,
+        action: "type",
+        ctrlKey: isCtrl,
+        shiftKey: isShift,
+        altKey: isAlt
+      });
     } else {
-      // Special key
-      sendRemoteControl("keyboard", { key: e.key, action: "press" });
+      // Special key (arrows, Enter, etc.)
+      sendRemoteControl("keyboard", {
+        key,
+        action: "press",
+        ctrlKey: isCtrl,
+        shiftKey: isShift,
+        altKey: isAlt
+      });
+    }
+  };
+
+  // Clipboard operations (VIEWER ONLY)
+  const handleRemoteCopy = async () => {
+    try {
+      // Read from host's clipboard via signaling
+      // This will be received via 'clipboard-data' event from host
+      sendRemoteControl("clipboard-copy", {});
+    } catch (err) {
+      console.error("[Clipboard] Copy error:", err);
+    }
+  };
+
+  const handleRemotePaste = async () => {
+    try {
+      // Read viewer's clipboard and send to host
+      const text = await navigator.clipboard.readText();
+      sendRemoteControl("clipboard-paste", { text });
+    } catch (err) {
+      console.error("[Clipboard] Paste error:", err);
+      alert("Failed to read clipboard. Please allow clipboard permissions in your browser.");
     }
   };
 
@@ -316,8 +412,11 @@ export default function App() {
 
     // HOST: New viewer joins - show permission request
     s.on("new-viewer", async ({ viewerId, viewerName }) => {
-      console.log(`[Host] New viewer: ${viewerName}`);
-      setPendingPermissionRequest({ viewerId, viewerName });
+      console.log(`[Host] New viewer:`, { viewerId, viewerName });
+      setPendingPermissionRequest({
+        viewerId,
+        viewerName: viewerName || "Anonymous Viewer"
+      });
 
       // Create WebRTC connection
       if (!previewStream.current) {
@@ -360,12 +459,39 @@ export default function App() {
       executeRemoteCommand("mouse-click", { button, x, y });
     });
 
+    s.on("remote-mouse-dblclick", ({ x, y, sender }) => {
+      executeRemoteCommand("mouse-dblclick", { x, y });
+    });
+
     s.on("remote-mouse-scroll", ({ deltaX, deltaY, sender }) => {
       executeRemoteCommand("mouse-scroll", { deltaX, deltaY });
     });
 
-    s.on("remote-keyboard", ({ key, action, sender }) => {
-      executeRemoteCommand("keyboard", { key, action });
+    s.on("remote-keyboard", ({ key, action, ctrlKey, shiftKey, altKey, sender }) => {
+      executeRemoteCommand("keyboard", { key, action, ctrlKey, shiftKey, altKey });
+    });
+
+    s.on("remote-clipboard-copy", async ({ sender }) => {
+      // Host sends clipboard data back to viewer
+      if (isElectron && window.electronAPI.clipboard) {
+        const text = await window.electronAPI.clipboard.readText();
+        s.emit("clipboard-data", { target: sender, text });
+      }
+    });
+
+    s.on("remote-clipboard-paste", ({ text, sender }) => {
+      // Host receives clipboard text from viewer
+      executeRemoteCommand("clipboard-paste", { text });
+    });
+
+    // VIEWER: Receive clipboard data from host
+    s.on("clipboard-data", async ({ text }) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        console.log("[Clipboard] Received data from host:", text.substring(0, 50));
+      } catch (err) {
+        console.error("[Clipboard] Failed to write:", err);
+      }
     });
 
     // ===== WEBRTC SIGNALING =====
@@ -378,10 +504,26 @@ export default function App() {
       const pc = createPeerConnection(sender, false);
       peers.current[sender] = pc;
 
+      // CRITICAL: Set up ontrack handler BEFORE setting remote description
       pc.ontrack = (event) => {
-        console.log("[Viewer] Received track");
+        console.log("[Viewer] Received track:", event.track.kind);
+        console.log("[Viewer] Event streams:", event.streams);
+        console.log("[Viewer] Stream ID:", event.streams[0]?.id);
+        console.log("[Viewer] Track ID:", event.track.id);
+        console.log("[Viewer] Current videoRef srcObject:", videoRef.current?.srcObject);
+
         if (videoRef.current && event.streams[0]) {
+          console.log("[Viewer] Setting video srcObject to remote stream");
           videoRef.current.srcObject = event.streams[0];
+
+          // Verify what we just set
+          console.log("[Viewer] Video srcObject after setting:", videoRef.current.srcObject);
+          console.log("[Viewer] Video srcObject tracks:", videoRef.current.srcObject?.getTracks());
+
+          // Force video to play
+          videoRef.current.play().catch(e => console.error("[Viewer] Play error:", e));
+        } else {
+          console.error("[Viewer] Cannot set stream - videoRef or stream missing");
         }
       };
 
@@ -392,6 +534,7 @@ export default function App() {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         s.emit("answer", { target: sender, sdp: answer });
+        console.log(`[Viewer] Sent answer to ${sender}`);
       } catch (err) {
         console.error("[Viewer] Offer handling error:", err);
       }
@@ -437,9 +580,16 @@ export default function App() {
       setConnectionStatus("waiting");
     });
 
-    s.on("host-ready", ({ hostId: hId }) => {
-      hostId.current = hId;
-      setConnectionStatus("connected");
+    s.on("host-ready", (data) => {
+      // Ignore if this is the host receiving their own broadcast
+      if (isHost) return;
+
+      // Safety check for undefined data
+      if (data && data.hostId) {
+        hostId.current = data.hostId;
+        setConnectionStatus("connected");
+        console.log("[Viewer] Host is ready:", data.hostId);
+      }
     });
 
     // Emit join-room
@@ -447,8 +597,14 @@ export default function App() {
 
     // If host, load sources and start preview
     if (isHost) {
-      await loadSourcesIfElectron();
-      await startPreviewForHost();
+      try {
+        await loadSourcesIfElectron();
+        await startPreviewForHost();
+      } catch (err) {
+        console.error("[Host] Failed to start preview:", err);
+        // Error already shown to user in startPreviewForHost
+        // Continue anyway - host can retry with source selector
+      }
     }
 
     setRoomJoined(true);
@@ -474,6 +630,98 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSource]);
+
+  // Global keyboard shortcut: Shift+F1 to toggle remote control (VIEWER ONLY)
+  useEffect(() => {
+    if (isHost) return;
+
+    const handleGlobalKeyDown = (e) => {
+      // Shift + F1 to toggle remote control
+      if (e.shiftKey && e.key === 'F1') {
+        e.preventDefault();
+        if (myPermissions.mouseControl || myPermissions.keyboardControl) {
+          setRemoteControlActive(prev => !prev);
+          // Visual feedback
+          console.log(`[Shortcut] Remote control ${!remoteControlActive ? 'ENABLED' : 'DISABLED'} via Shift+F1`);
+        } else {
+          alert("Please wait for the host to grant you remote control permissions.");
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isHost, myPermissions, remoteControlActive]);
+
+  // Fullscreen functions
+  const enterFullscreen = async () => {
+    if (!videoContainerRef.current) return;
+
+    try {
+      if (videoContainerRef.current.requestFullscreen) {
+        await videoContainerRef.current.requestFullscreen();
+      } else if (videoContainerRef.current.webkitRequestFullscreen) {
+        await videoContainerRef.current.webkitRequestFullscreen();
+      } else if (videoContainerRef.current.mozRequestFullScreen) {
+        await videoContainerRef.current.mozRequestFullScreen();
+      } else if (videoContainerRef.current.msRequestFullscreen) {
+        await videoContainerRef.current.msRequestFullscreen();
+      }
+      setIsFullscreen(true);
+    } catch (err) {
+      console.error("Failed to enter fullscreen:", err);
+    }
+  };
+
+  const exitFullscreen = async () => {
+    try {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        await document.webkitExitFullscreen();
+      } else if (document.mozCancelFullScreen) {
+        await document.mozCancelFullScreen();
+      } else if (document.msExitFullscreen) {
+        await document.msExitFullscreen();
+      }
+      setIsFullscreen(false);
+    } catch (err) {
+      console.error("Failed to exit fullscreen:", err);
+    }
+  };
+
+  const toggleFullscreen = () => {
+    if (isFullscreen) {
+      exitFullscreen();
+    } else {
+      enterFullscreen();
+    }
+  };
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isCurrentlyFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      );
+      setIsFullscreen(isCurrentlyFullscreen);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
 
   // Connection status color
   const getStatusColor = () => {
@@ -622,7 +870,7 @@ export default function App() {
               minWidth: 400
             }}>
               <h2 style={{ marginTop: 0, color: "#6cf" }}>🔐 Permission Request</h2>
-              <p><strong>{pendingPermissionRequest.viewerName}</strong> wants to control this computer.</p>
+              <p><strong>{pendingPermissionRequest.viewerName || "Anonymous Viewer"}</strong> wants to control this computer.</p>
 
               <div style={{ margin: "20px 0" }}>
                 <label style={{ display: "block", marginBottom: 10, cursor: "pointer" }}>
@@ -705,32 +953,6 @@ export default function App() {
             }} />
           )}
 
-          {/* Viewer: Remote Control Status */}
-          {!isHost && (
-            <div style={{ marginBottom: 15, padding: 15, background: "#222", borderRadius: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <strong>Remote Control Status:</strong>
-                  <div style={{ fontSize: 14, color: "#888", marginTop: 5 }}>
-                    Mouse: {myPermissions.mouseControl ? "✓ Enabled" : "✗ Disabled"} •
-                    Keyboard: {myPermissions.keyboardControl ? " ✓ Enabled" : " ✗ Disabled"}
-                  </div>
-                </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={remoteControlActive}
-                    onChange={e => setRemoteControlActive(e.target.checked)}
-                    disabled={!myPermissions.mouseControl && !myPermissions.keyboardControl}
-                  />
-                  <span style={{ fontWeight: "bold", color: remoteControlActive ? "#0f0" : "#888" }}>
-                    {remoteControlActive ? "🎮 Active" : "⏸️ Paused"}
-                  </span>
-                </label>
-              </div>
-            </div>
-          )}
-
           {/* Host: Source selector */}
           {isHost && isElectron && sources.length > 0 && (
             <div style={{ marginBottom: 15 }}>
@@ -757,27 +979,132 @@ export default function App() {
           )}
 
           {/* Video element with remote control event handlers */}
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted={isHost}
-            onMouseMove={!isHost ? handleVideoMouseMove : undefined}
-            onClick={!isHost ? handleVideoClick : undefined}
-            onContextMenu={!isHost ? handleVideoClick : undefined}
-            onWheel={!isHost ? handleVideoWheel : undefined}
-            onKeyDown={!isHost ? handleVideoKeyDown : undefined}
-            tabIndex={!isHost ? 0 : undefined}
+          <div
+            ref={videoContainerRef}
             style={{
-              width: "100%",
+              position: "relative",
               maxWidth: "1200px",
               background: "#000",
-              border: `3px solid ${connectionStatus === "connected" ? "#0f0" : "#444"}`,
-              borderRadius: 8,
-              display: "block",
-              cursor: !isHost && remoteControlActive ? "crosshair" : "default"
+              borderRadius: 8
             }}
-          />
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted={isHost}
+              onMouseMove={!isHost ? handleVideoMouseMove : undefined}
+              onClick={!isHost ? handleVideoClick : undefined}
+              onDoubleClick={!isHost ? handleVideoDoubleClick : undefined}
+              onContextMenu={!isHost ? handleVideoClick : undefined}
+              onWheel={!isHost ? handleVideoWheel : undefined}
+              onKeyDown={!isHost ? handleVideoKeyDown : undefined}
+              tabIndex={!isHost ? 0 : undefined}
+              style={{
+                width: "100%",
+                background: "#000",
+                border: `3px solid ${connectionStatus === "connected" ? "#0f0" : "#444"}`,
+                borderRadius: 8,
+                display: "block",
+                cursor: !isHost && remoteControlActive ? "crosshair" : "default"
+              }}
+            />
+
+            {/* Remote Control Status Overlay (Viewer only) */}
+            {!isHost && (
+              <div style={{
+                position: "absolute",
+                top: 20,
+                left: 20,
+                right: 20,
+                padding: 15,
+                background: "rgba(34, 34, 34, 0.9)",
+                borderRadius: 8,
+                backdropFilter: "blur(10px)",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
+                zIndex: 5,
+                transition: "all 0.3s ease"
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                  <div>
+                    <strong style={{ fontSize: 14 }}>Remote Control Status:</strong>
+                    <div style={{ fontSize: 12, color: "#888", marginTop: 5 }}>
+                      Mouse: {myPermissions.mouseControl ? "✓ Enabled" : "✗ Disabled"} •
+                      Keyboard: {myPermissions.keyboardControl ? " ✓ Enabled" : " ✗ Disabled"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#6cf", marginTop: 5, fontStyle: "italic" }}>
+                      💡 Press Shift+F1 to toggle
+                    </div>
+                  </div>
+                  <label style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    cursor: (!myPermissions.mouseControl && !myPermissions.keyboardControl) ? "not-allowed" : "pointer",
+                    opacity: (!myPermissions.mouseControl && !myPermissions.keyboardControl) ? 0.5 : 1
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={remoteControlActive}
+                      onChange={e => {
+                        if (myPermissions.mouseControl || myPermissions.keyboardControl) {
+                          setRemoteControlActive(e.target.checked);
+                        } else {
+                          alert("Please wait for the host to grant you remote control permissions.");
+                        }
+                      }}
+                      style={{
+                        cursor: (!myPermissions.mouseControl && !myPermissions.keyboardControl) ? "not-allowed" : "pointer",
+                        width: 18,
+                        height: 18
+                      }}
+                    />
+                    <span style={{ fontWeight: "bold", color: remoteControlActive ? "#0f0" : "#888", fontSize: 14 }}>
+                      {remoteControlActive ? "🎮 Active" : "⏸️ Paused"}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Fullscreen button for viewers */}
+            {!isHost && (
+              <button
+                onClick={toggleFullscreen}
+                style={{
+                  position: "absolute",
+                  bottom: 20,
+                  right: 20,
+                  width: 50,
+                  height: 50,
+                  borderRadius: "50%",
+                  border: "2px solid #fff",
+                  background: "rgba(0, 0, 0, 0.7)",
+                  color: "#fff",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "all 0.3s ease",
+                  backdropFilter: "blur(10px)",
+                  zIndex: 10
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = "rgba(102, 126, 234, 0.9)";
+                  e.target.style.transform = "scale(1.1)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = "rgba(0, 0, 0, 0.7)";
+                  e.target.style.transform = "scale(1)";
+                }}
+                title={isFullscreen ? "Exit Fullscreen (ESC)" : "Enter Fullscreen"}
+              >
+                {isFullscreen ? "⤓" : "⛶"}
+              </button>
+            )}
+          </div>
 
           {/* Chat */}
           <div style={{ marginTop: 30, maxWidth: 800 }}>

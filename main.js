@@ -1,5 +1,5 @@
 // main.js - Electron main process with remote control support
-const { app, BrowserWindow, ipcMain, desktopCapturer } = require("electron");
+const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard } = require("electron");
 const path = require("path");
 
 let mainWindow;
@@ -153,18 +153,45 @@ ipcMain.handle("execute-mouse-scroll", async (event, deltaX, deltaY) => {
 });
 
 // Execute keyboard input
-ipcMain.handle("execute-keyboard", async (event, key, action) => {
+ipcMain.handle("execute-keyboard", async (event, key, action, ctrlKey, shiftKey, altKey) => {
   try {
-    console.log(`[Remote Control] Keyboard: ${action} key=${key}`);
+    console.log(`[Remote Control] Keyboard: ${action} key=${key}, ctrl=${ctrlKey}, shift=${shiftKey}, alt=${altKey}`);
+
+    // Handle modifier keys
+    const modifiers = [];
+    if (ctrlKey) modifiers.push(Key.LeftControl);
+    if (shiftKey) modifiers.push(Key.LeftShift);
+    if (altKey) modifiers.push(Key.LeftAlt);
 
     if (action === "type") {
-      // Type a string
-      await keyboard.type(key);
+      // Type a string with modifiers
+      if (modifiers.length > 0) {
+        // Press modifiers, type key, release modifiers
+        for (const mod of modifiers) {
+          await keyboard.pressKey(mod);
+        }
+        await keyboard.type(key);
+        for (const mod of modifiers.reverse()) {
+          await keyboard.releaseKey(mod);
+        }
+      } else {
+        await keyboard.type(key);
+      }
     } else if (action === "press") {
-      // Press a special key
+      // Press a special key with modifiers
       const nutKey = mapKeyToNutKey(key);
       if (nutKey) {
-        await keyboard.type(nutKey);
+        if (modifiers.length > 0) {
+          for (const mod of modifiers) {
+            await keyboard.pressKey(mod);
+          }
+          await keyboard.type(nutKey);
+          for (const mod of modifiers.reverse()) {
+            await keyboard.releaseKey(mod);
+          }
+        } else {
+          await keyboard.type(nutKey);
+        }
       } else {
         // If not a special key, just type it
         await keyboard.type(key);
@@ -203,6 +230,30 @@ function mapKeyToNutKey(key) {
 
   return keyMap[key] || null;
 }
+
+// Clipboard read handler
+ipcMain.handle("clipboard-read-text", async () => {
+  try {
+    const text = clipboard.readText();
+    console.log(`[Clipboard] Read text (${text.length} chars)`);
+    return text;
+  } catch (err) {
+    console.error("Clipboard read error:", err);
+    return "";
+  }
+});
+
+// Clipboard write handler
+ipcMain.handle("clipboard-write-text", async (event, text) => {
+  try {
+    clipboard.writeText(text);
+    console.log(`[Clipboard] Wrote text (${text.length} chars)`);
+    return { success: true };
+  } catch (err) {
+    console.error("Clipboard write error:", err);
+    return { success: false, error: err.message };
+  }
+});
 
 // ========== END REMOTE CONTROL HANDLERS ==========
 
